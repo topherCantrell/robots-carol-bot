@@ -1,0 +1,4 @@
+
+* Get adapter for my COM2
+* Install the Palm software
+* Test floating point on the palm

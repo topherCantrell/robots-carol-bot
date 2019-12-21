@@ -1,0 +1,255 @@
+' ---------------------------------------------------------
+' This program controls the CarolBot hardware. All of the
+' hardware functions are available through subtroutines in
+' this code should this processor also become the primary
+' controller. Or the slave-mode can be used to interact
+' with a primary controller through the programming port.
+' The byte-code format used in slave-mode is given in 
+' comments below.
+'
+' Version 1.5 Chris Cantrell 2002'
+' ---------------------------------------------------------
+
+'----------------------------------------------------------
+' I/O Pins
+'  0 OUTPUT MP3-STOP
+'  1 OUTPUT MP3-NEXT
+'  2 OUTPUT MP3-PLAY
+'  3 OUTPUT SERIAL-LCD
+'  4 - NOT USED -
+'  5 OUTPUT MOTOR-DIRECTION-LEFT
+'  6 OUTPUT MOTOR-ENABLE-LEFT
+'  7 - NOT USED -
+'  8 OUTPUT MOTOR-DIRECTION-RIGHT
+'  9 OUTPUT MOTOR-ENABLE-RIGHT
+' 10 OUTPUT SENSOR-C-CONTROL
+' 11 INPUT  SENSOR-C-DATA
+' 12 OUTPUT SENSOR-B-CONTROL
+' 13 INPUT  SENSOR-B-DATA
+' 14 OUTPUT SENSOR-A-CONTROL
+' 15 INPUT  SENSOR-A-DATA
+
+' ---------------------------------------------------------
+' Variable declarations
+' ---------------------------------------------------------
+
+' Generic parameters
+genericString var byte(20)
+genericA var byte
+genericB var byte
+
+' Loops and counts
+x var byte
+y var byte
+z var byte
+
+'
+' ---------------------------------------------------------
+' Main
+' ---------------------------------------------------------
+'
+
+' INITIALIZATION
+
+' PIN3 is output to display. Make it output to avoid ghost
+' characters.
+output 3
+
+' Turn off MP3 switches
+low 0
+low 1
+low 2
+
+' Make sure MP3 is off
+pause 500
+high 0
+pause 100
+low 0
+
+pause 1000
+
+' SLAVE MODE
+goto SLAVE
+
+
+
+
+' ---------------------------------------------------------
+' Slave Loop used to put BS2 in I/O control processor
+' mode.
+'
+' 00 - 33 Motor commands in the form LR where each digit:
+'  0 = off
+'  1 = forward
+'  3 = backward
+'
+' 80 - MP3 Stop
+' 81 - MP3 Next
+' 82 - MP3 Play
+'
+' 90 - Read sensor 0 (single byte value sent back)
+' 91 - Read sensor 1 (single byte value sent back)
+' 92 - Read sensor 2 (single byte value send back)
+'
+' A0 - Display string (followed by length byte and then 
+'      text bytes ) MAX STRING LENGTH IS 20 BYTES --- PERIOD
+'
+' ---------------------------------------------------------
+
+SLAVE:
+
+  serin 16,84,[genericA]
+
+  if (genericA>=128) then notmotors
+
+  genericB = genericA & 3
+  genericA = genericA / 16
+  genericA = genericA & 3 
+  gosub MOTOR_CONTROL
+  goto SLAVE
+
+notmotors:
+
+  if(genericA>=144) then notmp3
+  genericA=genericA-128
+  genericA=genericA & 3
+  gosub PLAYER_CONTROL
+  goto SLAVE  
+
+notmp3:
+
+  if(genericA>=160) then notsensors
+  genericA=genericA-144
+  genericA=genericA & 3
+  gosub READ_SENSOR
+  serout 16, 84, [genericA]
+  goto SLAVE
+
+notsensors:
+
+  if(genericA<>160) then notdisplay
+  serin 16,84,[genericA]
+  serin 16,84, [STR genericString\genericA]
+  gosub DISPLAY_STRING  
+  goto SLAVE
+
+notdisplay:
+  
+  goto SLAVE
+
+
+' ---------------------------------------------------------
+' Subroutines
+' ---------------------------------------------------------
+
+' ---------------------------------------------------------
+' This subroutine sends the text stored in the generic
+' string parameter to the display.
+' @param genericString the text
+' @param genericA the length of the text
+'
+DISPLAY_STRING:
+  for x = 0 to (genericA-1)
+    serout 3,16468,[genericString(x)]
+  next
+return
+
+' ---------------------------------------------------------
+' This subroutine controls the states of the motors.
+' @param genericA left motor bits
+' @param genericB right motor bits
+'  0 = stop
+'  1 = forwards
+'  3 = backwards
+'
+MOTOR_CONTROL:
+' A little brute force here ...
+  if (genericA & 2) = 0 then mca
+    high 5
+    goto mcaa
+  mca:
+    low 5
+mcaa:
+  if (genericB & 2) = 0 then mcb
+    high 8
+    goto mcbb
+  mcb:
+    low 8
+mcbb:
+  if (genericA & 1) = 0 then mcc
+    high 6
+    goto mccc
+  mcc:
+    low 6
+mccc:
+  if (genericB & 1) = 0 then mcd
+    high 9
+    goto mcdd
+  mcd:
+    low 9
+mcdd:  
+return
+
+' ---------------------------------------------------------
+' This subroutine presses one of the MP3 player buttons.
+' @param genericA button to press as follows:
+'  0 = stop
+'  1 = next
+'  2 = play
+'
+PLAYER_CONTROL:
+  genericA = genericA & 3
+  high genericA
+  pause 100
+  low genericA
+return
+
+' ---------------------------------------------------------
+' This subroutine reads a sensor.
+' @param genericA the sensor to read (0,1, or 2)
+' @return genericA the value from the sensor
+'
+READ_SENSOR:
+
+  if (genericA=0) then readA
+  if (genericA=1) then readB
+  goto readC
+
+readA:
+	High 14
+	Pause 3
+	Low 14
+	For x=1 to 70
+	Pause 1
+	If IN15 = 1 Then jumpa
+	Next
+jumpa:	
+	Shiftin 15,14,2,[genericA\8]
+
+allout:
+      return
+
+readB:
+	High 12
+	Pause 3
+	Low 12
+	For x=1 to 70
+	Pause 1
+	If IN13 = 1 Then jumpb
+	Next
+jumpb:	
+	Shiftin 13,12,2,[genericA\8]
+      goto allout      
+
+readC:
+	High 10
+	Pause 3
+	Low 10
+	For x=1 to 70
+	Pause 1
+	If IN11 = 1 Then jumpc
+	Next
+jumpc:	
+	Shiftin 11,10,2,[genericA\8]
+      goto allout
+  
